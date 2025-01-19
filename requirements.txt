@@ -1,0 +1,4 @@
+ffmpeg-python
+requests
+openai-whisper
+numpy<2
