@@ -6,8 +6,9 @@ import sys
 import os
 import re
 from pathlib import Path
+import argparse
 
-
+# Builds the episode transcripts from the .srt files
 class EpisodeTranscriptsBuilder:
     def __init__(self):
         self.trans_array = []
@@ -42,6 +43,7 @@ class EpisodeTranscriptsBuilder:
                 episode_transcripts[episode_number] = transcript
         return episode_transcripts
 
+# Converts audio to transcript using the whisper library
 class AudioToTranscriptConverter:
     def __init__(self, model_name="base"):
         self.model = whisper.load_model(model_name)
@@ -78,18 +80,36 @@ class AudioToTranscriptConverter:
         
         return audio_file
 
-def main():
-    season_number = 8  # Example season number
-    video_input_directory = Path(f"{r"G:\Apps\trans-epi-script\og\Season 0"}{season_number}")
-    transcript_input_directory = Path(f"{r"G:\Apps\trans-epi-script\2013-brooklyn-nine-nine\Season "}{season_number}")
-    output_directory = Path(f"{r".\output_"}{season_number}")
-    show_name = "brooklyn-nine-nine"  # TMDb Show ID for your show
+# Handles inputs from the command line
+class ArgumentParser:
+    def __init__(self):
+        self.parser = argparse.ArgumentParser(description="Process video files and transcripts.")
+        self.parser.add_argument("--season_number", type=int, required=True, help="Season number")
+        self.parser.add_argument("--video_input_directory", type=str, required=True, help="Path to the video input directory")
+        self.parser.add_argument("--transcript_input_directory", type=str, required=True, help="Path to the transcript input directory")
+        self.parser.add_argument("--output_directory", type=str, required=True, help="Path to the output directory")
+        self.parser.add_argument("--show_name", type=str, required=True, help="Show name")
 
-    episode_transcripts_builder = EpisodeTranscriptsBuilder()
-    episode_transcripts = episode_transcripts_builder.find_srt_files(transcript_input_directory)
+    def parse_args(self):
+        args = self.parser.parse_args()
+        return {
+             "season_number": int(args.season_number),
+            "video_input_directory": Path(rf"{args.video_input_directory}{args.season_number}"),
+            "transcript_input_directory": Path(rf"{args.transcript_input_directory}{args.season_number}"),
+            "output_directory": Path(rf"{args.output_directory}{args.season_number}"),
+            "show_name": args.show_name
+        }
 
-    audio_converter = AudioToTranscriptConverter()
+def rename_and_move_episodes(final_dict, output_directory, show_name, season_number):
+    for episode_number, data in final_dict.items():
+        best_match_episode = data["best_match_episode"]
+        original_file = data["original_file"]
+        file_extension = os.path.splitext(original_file)[1]
+        new_filename = Path(f"{output_directory}/{show_name}-S{season_number}E{best_match_episode}{file_extension}")
+        new_filename.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(original_file, new_filename)
 
+def find_matching_episodes(video_input_directory, episode_transcripts, audio_converter):
     final_dict = {}
     video_files = Path(video_input_directory).rglob("*")
     print(f"Searching for files in: {video_input_directory}")
@@ -125,13 +145,24 @@ def main():
                 "best_match_episode": current_episode_match,
                 "best_match_score": cur_match_score
             }
+    return final_dict
 
-    for episode_number, data in final_dict.items():
-        best_match_episode = data["best_match_episode"]
-        original_file = data["original_file"]
-        file_extension = os.path.splitext(original_file)[1]
-        new_filename = f"{output_directory}/{show_name}-S{season_number}E{best_match_episode}{file_extension}"
-        shutil.move(original_file, new_filename)
+def main():
+    arg_parser = ArgumentParser()
+    config = arg_parser.parse_args()
+
+    # Get all the "truth" transcripts for the episodes
+    episode_transcripts_builder = EpisodeTranscriptsBuilder()
+    episode_transcripts = episode_transcripts_builder.find_srt_files(config["transcript_input_directory"])
+
+    # Initialize the audio converter
+    audio_converter = AudioToTranscriptConverter()
+
+    # Match the episodes based on the transcripts
+    final_dict = find_matching_episodes(config["video_input_directory"], episode_transcripts, audio_converter)
+
+    # Rename and move the episodes to the output directory
+    rename_and_move_episodes(final_dict, config["output_directory"], config["show_name"], config["season_number"])
 
 if __name__ == "__main__":
     main()
